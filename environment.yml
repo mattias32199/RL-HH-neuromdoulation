@@ -252,4 +252,3 @@ dependencies:
       - torch==2.4.1
       - typeguard==2.13.3
       - tzdata==2025.1
-prefix: /Users/mattiashollmann/miniforge3/envs/SimulationPlatform
