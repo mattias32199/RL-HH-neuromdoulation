@@ -38,14 +38,14 @@ class SparsePlaceSpherical(PreDefElecGrid, TransferFunction):
             self.phi_elec = phi_elec
         self.elec_radius = elec_radius * 10**(-2)
         self.curr_density_calculated = False
-    
+
     def evaluate_voltage_fast(self,r,theta,phi):
         if self.voltage_diff_height_flag is False:
             raise Exception('Calculate the current density first using calc_curr_density() function')
         r, theta, phi =  r.flatten(), theta.flatten(), phi.flatten()
         field = np.empty(len(theta))
         for i in range(len(theta)):
-            r_idx = np.argmin(np.abs(self.r_lst-r[i])) 
+            r_idx = np.argmin(np.abs(self.r_lst-r[i]))
             idx1 = np.searchsorted(self.lat_theta, theta[i])
             if idx1 == 0:
                 idx1 = 1
@@ -54,7 +54,7 @@ class SparsePlaceSpherical(PreDefElecGrid, TransferFunction):
                 idx2 = idx2 - 1
             field[i] = self.voltage_lst[r_idx][len(self.lat_theta)-idx1, idx2]
         return field
-    
+
 
     def evaluate_Efield_fast(self,r,theta,phi,J):
         if self.voltage_diff_height_flag is False:
@@ -73,7 +73,7 @@ class SparsePlaceSpherical(PreDefElecGrid, TransferFunction):
             field[i,1] = curr_density[1][len(self.lat_theta)-idx1, idx2]
             field[i,2] = curr_density[2][len(self.lat_theta)-idx1, idx2]
         return field
-    
+
     def calc_voltage_diff_height(self, r_start, J=None, fname_load=None, fname_save=None):
         if fname_load is None:
             dr = 0.0004 #4 um discretization
@@ -93,9 +93,9 @@ class SparsePlaceSpherical(PreDefElecGrid, TransferFunction):
         else:
             self.voltage_lst=np.load(fname_load+"_voltage.npy")
             self.r_lst=np.load(fname_load+"_r.npy")
-        
+
         self.voltage_diff_height_flag = True
- 
+
     def plot_elec_pttrn(self, J, x_lim=None, y_lim=None, fname=None):
         if self.custom_grid is False:
             elec_lst, ground_elec, elec_radius = self.uniform_sampling_north_pole(elec_spacing=self.elec_spacing * 10 ** (2), elec_radius=self.elec_radius * 10 ** (2), patch_size=self.patch_size * 10 ** (2))
@@ -196,24 +196,24 @@ class SparsePlaceSpherical(PreDefElecGrid, TransferFunction):
             self.electrode_sampling(elec_pos=elec_lst, elec_radii=elec_radius, injected_curr=self.J_sparseplace_vanilla)
         else:
             self.electrode_sampling(elec_pos=elec_lst, elec_radii=elec_radius, injected_curr=J)
-        
+
         grid_electrode = shp_harm.SHGrid.from_array(np.flip(self.electrode_spherical_map, axis=0), grid='DH')
         coeff = grid_electrode.expand()
         coeff_array = coeff.coeffs
         # grid_electrode.plot(colorbar='right')
-        
+
         tau_V,tau_Jr , _ = self.calc_tauL(r)
         tau_V = np.hstack((np.array((0,)), tau_V))
         tau_Jr = np.hstack((np.array((0,)), tau_Jr))
-        
-        ## Calculating the voltage        
+
+        ## Calculating the voltage
         voltage_coeff = np.zeros(coeff_array.shape)
         voltage_coeff[0, :, :] = np.transpose(np.transpose(coeff_array[0]) * tau_V)
         voltage_coeff[1, :, :] = np.transpose(np.transpose(coeff_array[1]) * tau_V)
         voltage_coeff = shp_harm.SHCoeffs.from_array(voltage_coeff)
         voltage = voltage_coeff.expand(grid='DH')
         self.voltage_at_target = voltage.data*10
-        
+
         lat = voltage.lats()
         lat = lat/180*np.pi
 
@@ -231,7 +231,7 @@ class SparsePlaceSpherical(PreDefElecGrid, TransferFunction):
         curr_density_r_coeff = shp_harm.SHCoeffs.from_array(curr_density_r_coeff)
         curr_density_r = curr_density_r_coeff.expand(grid='DH')
         self.curr_density_r = curr_density_r.data
-        
+
         ### Current Density Theta
         del_theta = lat[1]-lat[0]
         self.curr_density_theta = np.zeros(self.voltage_at_target.shape)
@@ -240,7 +240,7 @@ class SparsePlaceSpherical(PreDefElecGrid, TransferFunction):
         for i in range(self.voltage_at_target.shape[0]-2):
             self.curr_density_theta[i+1] = (-self.voltage_at_target[i]+self.voltage_at_target[i+2])/(2*r*10**(-2)*del_theta)
         self.curr_density_theta = -1*self.cond_vec[layer_idx]*self.curr_density_theta/10
-        
+
         ### Current Density Phi
         del_phi = np.abs(self.long_phi[0] - self.long_phi[1])
         self.curr_density_phi = np.zeros(self.voltage_at_target.shape)
@@ -268,7 +268,7 @@ class SparsePlaceSpherical(PreDefElecGrid, TransferFunction):
         ### Plotting the first half
         idx = spherical_map_flatten[:, 1] <= 0
         x_arr, y_arr = r*10**1*np.cos(spherical_map_flatten[idx, 1]) * np.cos(spherical_map_flatten[idx, 0]), r*10**1*np.cos(spherical_map_flatten[idx, 1])*np.sin(spherical_map_flatten[idx, 0])
-        #r_idx = np.argmin(np.abs(self.r_lst-r)) 
+        #r_idx = np.argmin(np.abs(self.r_lst-r))
         data_flatten = self.curr_density_at_target.flatten()#self.voltage_lst[r_idx].flatten()
         data_flatten = data_flatten[idx]
         field = np.empty(len(x))
@@ -278,7 +278,7 @@ class SparsePlaceSpherical(PreDefElecGrid, TransferFunction):
         return field
 
 
-    
+
     def plot_voltage(self, r, J=None, x_limit=None, y_limit=None, fname=None, abs=True):
         if J is None:
            if self.voltage_at_target is False:
@@ -317,7 +317,7 @@ class SparsePlaceSpherical(PreDefElecGrid, TransferFunction):
         for i in range(len(x_discretize)):
             for j in range(len(y_discretize)):
                 data_projected[i, j] = np.mean(data_flatten[np.where(np.square(x - x_discretize[i]) + np.square(y - y_discretize[j]) <= spacing_x ** 2 + spacing_y ** 2)])
-        
+
         data_projected = np.transpose(data_projected)
         data_projected = np.flip(data_projected, axis=0)
         sns.heatmap(data_projected, cmap="jet")
@@ -435,10 +435,3 @@ class SparsePlaceSpherical(PreDefElecGrid, TransferFunction):
 
         plt.show()
         return [max_x, max_y]
-
-
-
-
-
-
-
