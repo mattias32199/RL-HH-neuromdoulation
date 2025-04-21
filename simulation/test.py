@@ -5,12 +5,12 @@ import ray
 import importlib as imp
 import mdp_util
 imp.reload(mdp_util)
-from mdp_util import hodgkin_huxley_model, get_firing_rate
+from mdp_util import HodkinHuxley_Model, hodgkin_huxley_model, get_firing_rate
 import numpy as np
 
 
 # %%
-hh_model = hodgkin_huxley_model()
+hh_model = HodkinHuxley_Model()
 
 parameters = {}
 parameters['amp1'] = 150
@@ -43,3 +43,28 @@ plt.plot(x1, y1, c='royalblue', label=f'Pyr {f1}')
 plt.plot(x2, y2, c='orangered', label=f'PV {f2}')
 plt.legend()
 plt.show()
+
+
+# %%
+t = np.arange(0, 1, 0.00001)
+
+a1, a2 = 1, 1
+f1, f2, = 100, 101
+
+s1 = a1 * np.sin(2*np.pi*f1*t)
+s2 = a2 * np.sin(2*np.pi*f2*t)
+#s3 = (a1+a2) * np.cos(np.pi*(f2-f1)*t) * np.sin(np.pi*(f1+f2)*t)
+s3 = s1 + s2
+
+plt.figure()
+plt.plot(t, s1,)
+plt.plot(t, s2,)
+plt.plot(t, s3,)
+plt.show()
+
+
+t
+
+
+# %%
+#
