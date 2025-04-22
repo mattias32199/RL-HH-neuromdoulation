@@ -10,14 +10,14 @@ class HodgkinHuxley_Environment(gym.Env):
     def __init__(self):
         super().__init__()
         self.action_space = gym.spaces.Box(
-            low=np.array([1, 1, 1, 1]),
-            high=np.array([2e3, 2e3, 5, 5]),
+            low=np.array([1, 1, 5, 5]),
+            high=np.array([2e3, 2e3, 20e3, 20e3]),
             shape=(4,),
             dtype=np.float32
         )
         self.observation_space = gym.spaces.Box(
-            low=np.array([-150, 0]),
-            high=np.array([150, 1e4]),
+            low=np.array([-110, 0]),
+            high=np.array([110, 0.0004]),
             shape=(2, ),
             dtype=np.float32
         )
@@ -32,14 +32,23 @@ class HodgkinHuxley_Environment(gym.Env):
         action: stimulus parameters
         """
         # simulation results
-        results = self.model.stimulate_neurons(self._map_action(action), type='temporal_interferece')
+        results = self.model.stimulate_neurons(self._map_action(action), type='temporal_interference')
         # calculate next state
-        self.state = self.calc_state(results)
+        self.state, terminated = self.calc_state(results)
         # calculate reward & episode terminality
-        reward, terminated = self.calc_reward(self.state)
+        reward = self.calc_reward(self.state)
         truncated = False
         self.current_step += 1
         info = {}
+
+        print('PINEAPPLE\n\n')
+        print(action)
+        print(self.state)
+        print(reward)
+        print(terminated)
+        print(truncated)
+
+        print(info)
         return self.state, reward, terminated, truncated, info #, info
     def close(self):
         pass
@@ -52,36 +61,62 @@ class HodgkinHuxley_Environment(gym.Env):
 
     def calc_state(self, simulation_results):
         # firing rates
-        response_Pyr = simulation_results['response_pyr']
-        t_Pyr = simulation_results['t_Pyr']
-        response_PV = simulation_results['response_PV']
-        t_PV = simulation_results['t_PV']
-        fr_Pyr = self.get_firing_rate(response_Pyr, t_Pyr)
-        fr_PV = self.get_firing_rate(response_PV, t_PV)
-        fr_diff = fr_PV - fr_Pyr
+
+        # response_Pyr = simulation_results['response_Pyr']
+        # t_Pyr = simulation_results['t_Pyr']
+        # response_PV = simulation_results['response_PV']
+        # t_PV = simulation_results['t_PV']
+        # fr_Pyr = self.get_firing_rate(response_Pyr, t_Pyr)
+        # fr_PV = self.get_firing_rate(response_PV, t_PV)
+        # fr_diff = fr_PV - fr_Pyr
+
+        s1o_neuron, s1o_time = simulation_results['s1_output'], simulation_results['s1_output_time']
+        s1i_stim, s1i_time = simulation_results['s1_input'], simulation_results['s1_input_time']
+        s2o_neuron, s2o_time = simulation_results['s2_output'], simulation_results['s2_output_time']
+        s2i_stim, s2i_time = simulation_results['s2_input'], simulation_results['s2_input_time']
+        do_neuron, do_time = simulation_results['d_output'], simulation_results['d_output_time']
+        fr_s1 = self.get_firing_rate(s1o_neuron, s1o_time)
+        fr_s2 = self.get_firing_rate(s2o_neuron, s2o_time)
+        fr_d = self.get_firing_rate(do_neuron, do_time)
+        fr_diff = fr_d - ((fr_s1 + fr_s2) / 2)
+        terminated = False
+        if fr_diff >= 90:
+            terminated = True
         # energy efficiency
-        amp_wf = simulation_results['amp_wf']
-        amp_t = simulation_results['amp_t']
-        nrg = np.sum(amp_wf ** 2) * (np.max(amp_t) / 1000)
+        #amp_wf = simulation_results['amp_wf']
+        #amp_t = simulation_results['amp_t']
+        nrg_shallow1 = np.sum((s1i_stim / 1e6) ** 2) * (s1i_time[1] - s1i_time[0]) / 1000
+        nrg_shallow2 = np.sum((s2i_stim / 1e6) ** 2) * (s2i_time[1] - s2i_time[0]) / 1000
+        # nrg = np.sum(amp_wf ** 2) * (np.max(amp_t) / 1000)
+        nrg = nrg_shallow1 + nrg_shallow2
         state = np.array([fr_diff, nrg], dtype=np.float32)
-        return state
-    def calc_reward(self, state, fr_coef=1.0, nrg_coef=1.0, fr_target=90, nrg_target=1000):
-        fr_diff = state['fr_diff']
-        nrg = state['energy'] # energy HAHA GET IT skibidi
-        fr_reward = fr_coef * (fr_diff - fr_target)
-        nrg_reward = nrg_coef * (nrg_target - nrg)
+        return state, terminated
+    def calc_reward(self, state, fr_coef=0.6, nrg_coef=0.4, fr_target=50, nrg_target=0.0004):
+        nrg_target = self.observation_space.high[1] ** 2 * 500e-3 * 2 # calculate nrg target from upper bound
+        fr_diff = state[0]
+        nrg = state[1] # energy HAHA GET IT skibidi
+        norm_fr_diff = self.normalize_firing_rate(fr_diff)
+        norm_nrg = self.normalize_nrg(nrg)
+        norm_fr_target = self.normalize_firing_rate(fr_target)
+        norm_nrg_target = self.normalize_nrg(nrg_target)
+        fr_reward = fr_coef * (norm_fr_diff - norm_fr_target)
+        nrg_reward = nrg_coef * (norm_nrg_target - norm_nrg)
         sum_reward = fr_reward + nrg_reward
         return sum_reward
     def _map_action(self, action):
         return {
-            'stim_type': 'temporal_interferece',
-            'amp1': action[0],
-            'amp2': action[1],
-            'freq1': action[2],
-            'freq2': action[3],
+            'stim_type': 'temporal_interference',
+            'freq1': action[0],
+            'freq2': action[1],
+            'amp1': action[2],
+            'amp2': action[3],
             'total_time': 500.0, # Example
             'plot_wf': False      # Example
         }
+    def normalize_firing_rate(self, fr):
+        return (fr - self.observation_space.low[0]) / (self.observation_space.high[0] - self.observation_space.low[0])
+    def normalize_nrg(self, nrg):
+        return (nrg - self.observation_space.low[1]) / (self.observation_space.high[1] - self.observation_space.low[1])
 
 
 class HodgkinHuxley_Model:
@@ -99,8 +134,10 @@ class HodgkinHuxley_Model:
         total_time = parameters['total_time']
         plot_waveform = parameters['plot_wf']
 
+
         if stimulation_type == 'temporal_interference':
-            results = [
+            ray_results = [
+                # shallow neuron 1
                 simulation_Pyr.remote(
                     num_electrode=1,
                     amp1 = amplitude1, amp2 = 0,
@@ -108,6 +145,7 @@ class HodgkinHuxley_Model:
                     total_time = total_time,
                     plot_waveform=plot_waveform # Set to True to plot injected current
                 ),
+                # shallow neuron 2
                 simulation_Pyr.remote(
                     num_electrode=1,
                     amp1=0, amp2 = amplitude2,
@@ -115,6 +153,7 @@ class HodgkinHuxley_Model:
                     total_time=total_time,
                     plot_waveform=plot_waveform # Set to True to plot injected current
                 ),
+                # deep neuron
                 simulation_Pyr.remote(
                     num_electrode=1,
                     amp1=amplitude1, amp2 = amplitude2,
@@ -123,8 +162,21 @@ class HodgkinHuxley_Model:
                     plot_waveform=plot_waveform # Set to True to plot injected current
                 ),
             ]
-            (o_s1, ot_s1, i_s1, it_s1), (o_s2, ot_s2, i_s2, it_s2), (o_s3, ot_s3, i_s3, it_s3) = ray.get(results)
-            pass
+            (o_s1, ot_s1, i_s1, it_s1), (o_s2, ot_s2, i_s2, it_s2), (o_s3, ot_s3, i_s3, it_s3) = ray.get(ray_results)
+            results = {
+                's1_output': o_s1,
+                's1_output_time': ot_s1,
+                's1_input': i_s1,
+                's1_input_time': it_s1,
+                's2_output': o_s2,
+                's2_output_time': ot_s2,
+                's2_input': i_s2,
+                's2_input_time': it_s2,
+                'd_output': o_s3,
+                'd_output_time': ot_s3,
+                'd_input': i_s3,
+                'd_input_time': it_s3,
+            }
         else: #stimulation_type == 'PV-Pyr':
             results = [
                 simulation_Pyr.remote(
