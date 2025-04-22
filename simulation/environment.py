@@ -18,7 +18,7 @@ class HodgkinHuxley_Environment(gym.Env):
         self.observation_space = gym.spaces.Box(
             low=np.array([-150, 0]),
             high=np.array([150, 1e4]),
-            shape=(),
+            shape=(2, ),
             dtype=np.float32
         )
         self.model = HodgkinHuxley_Model()
@@ -74,7 +74,7 @@ class HodgkinHuxley_Environment(gym.Env):
         return sum_reward
     def _map_action(self, action):
         return {
-            'stim_type': 'PV-Pyr',
+            'stim_type': 'temporal_interferece',
             'amp1': action[0],
             'amp2': action[1],
             'freq1': action[2],
