@@ -9,12 +9,9 @@ import torch
 
 
 class HodgkinHuxley_Environment:
-    def __init__(self, simulation_model, state_function, reward_function):
-        self.model = simulation_model()
-        self.calc_state = state_function
-        self.calc_reward = reward_function
+    def __init__(self):
+        self.model = HodgkinHuxley_Model()
         self.current_step = 0
-
     def reset(self):
         self.state = {'fr_diff': 0, 'energy': 0}
         return self.state
@@ -33,6 +30,39 @@ class HodgkinHuxley_Environment:
         return next_state, reward, done #, info
     def close(self):
         pass
+
+    def get_firing_rate(self, membrane_potential, t):
+        num_peaks, _ = find_peaks(membrane_potential.copy(), prominence=40)
+        duration = np.max(t)/1000 # convert to seconds
+        firing_rate = round(len(num_peaks)/duration) #firing rate
+        return firing_rate
+
+    def calc_state(self, simulation_results):
+        # firing rates
+        response_Pyr = simulation_results['response_pyr']
+        t_Pyr = simulation_results['t_Pyr']
+        response_PV = simulation_results['response_PV']
+        t_PV = simulation_results['t_PV']
+        fr_Pyr = self.get_firing_rate(response_Pyr, t_Pyr)
+        fr_PV = self.get_firing_rate(response_PV, t_PV)
+        fr_diff = fr_PV - fr_Pyr
+        # energy efficiency
+        amp_wf = simulation_results['amp_wf']
+        amp_t = simulation_results['amp_t']
+        nrg = np.sum(amp_wf ** 2) * (np.max(amp_t) / 1000)
+        state = {
+            'fr_diff': fr_diff,
+            'energy': nrg,
+        }
+        return state
+    def calc_reward(self, state, fr_coef=1.0, nrg_coef=1.0, fr_target=90, nrg_target=1000):
+        fr_diff = state['fr_diff']
+        nrg = state['energy'] # energy HAHA GET IT skibidi
+        fr_reward = fr_coef * (fr_diff - fr_target)
+        nrg_reward = nrg_coef * (nrg_target - nrg)
+        sum_reward = fr_reward + nrg_reward
+        return sum_reward
+
 
 class HodgkinHuxley_Model:
     """
@@ -102,38 +132,3 @@ class HodgkinHuxley_Model:
                 'amp_t': amp_t
             }
         return results
-
-
-def get_firing_rate(membrane_potential, t):
-    num_peaks, _ = find_peaks(membrane_potential.copy(), prominence=40)
-    duration = np.max(t)/1000 # convert to seconds
-    firing_rate = round(len(num_peaks)/duration) #firing rate
-    return firing_rate
-
-def get_state(simulation_results):
-
-    # firing rates
-    response_Pyr = simulation_results['response_pyr']
-    t_Pyr = simulation_results['t_Pyr']
-    response_PV = simulation_results['response_PV']
-    t_PV = simulation_results['t_PV']
-
-    fr_Pyr = get_firing_rate(response_Pyr, t_Pyr)
-    fr_PV = get_firing_rate(response_PV, t_PV)
-    fr_diff = fr_PV - fr_Pyr
-
-    # energy efficiency
-    amp_wf = simulation_results['amp_wf']
-    amp_t = simulation_results['amp_t']
-    nrg = np.sum(amp_wf ** 2) * (np.max(amp_t) / 1000)
-
-
-    state = {
-        'fr_diff': fr_diff,
-        'energy': nrg,
-    }
-
-    return state
-
-def store_experience(states, action):
-    pass

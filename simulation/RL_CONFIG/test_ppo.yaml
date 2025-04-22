@@ -1,0 +1,35 @@
+device: cpu
+seed: 42
+env:
+  is_continuous: True
+  state_dim: 2
+  action_dim: 8
+network:
+  action_std_init: 0.4
+  action_std_decay_rate: 0.1
+  min-action_std: 0.1
+  action_std_decay_freq: 5e4
+  shared_layer: False
+  optimizer: 3e-4
+train:
+  total_timesteps: 200
+  max_episode_lens: 128
+  gamma: 0.99
+  tau: 0.95
+  reward_scaler: False
+  observation_normalizer: False
+  clipping_gradient: True
+  scheduler: True
+  average_interval: 100
+  max_ckpt_count: 3
+  advantage_type: "gae"
+  off_policy_buffer_size: 0
+  fraction: 0
+ppo:
+  loss_type: clip
+  optim_epochs: 10
+  batch_size: 84
+  eps_clip: 0.2
+  coef_value_function: 0.5
+  coef_entropy_penalty: 0
+  value_clipping: True

@@ -306,9 +306,13 @@ class PPO_Memory:
     def update_priority(self, network, inds):
         pass
 class OffPolicy_PPOAgent:
-    def __init__(self, hyper_params):
+    def __init__(self, config):
+        """
+        config contains hyper parameters
+        """
+        self.config = config
         self.device = torch.device("cpu") # macbook pro
-        set_seed(hyper_params['seed'])
+        set_seed(self.config.seed)
 
         self.policy = Actor(
             state_dim=hyper_params['state_dim'],

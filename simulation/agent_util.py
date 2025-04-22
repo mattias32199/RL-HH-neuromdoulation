@@ -1,6 +1,7 @@
 import torch
 import numpy as np
 import random
+from omegaconf import OmegaConf
 
 ##############################################
 ####### UTIL FUNCTIONS USED BY RL AGENT ######
@@ -59,3 +60,15 @@ def data_iterator(batch_size, given_data, t=False):
     for nb in range(n_batches):
         idx = inds[batch_size * nb : batch_size * (nb + 1)]
         yield ob[idx], ac[idx], oldpas[idx], adv[idx], tdlamret[idx], old_v[idx]
+
+def get_config(yaml_file=None, yaml_string=None, **kwargs):
+    assert yaml_file is not None or yaml_string is not None, 'Must enter yaml_file or string'
+    if yaml_string is not None:
+        conf = OmegaConf.create(yaml_string)
+    else:
+        conf = OmegaConf.load(yaml_file)
+    if kwargs:
+        conf.update(kwargs)
+    if 'checkpoint_path' not in conf:
+        conf.checkpoint_path = '.'
+    return conf
