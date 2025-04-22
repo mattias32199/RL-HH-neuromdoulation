@@ -1,21 +1,32 @@
-from poplib import LF
-from re import M
 from simulation_Pyr import simulation_Pyr
 from simulation_PV import simulation_PV
 import numpy as np
 import ray
 from scipy.signal import find_peaks
-import torch
+import gymnasium as gym
 
 
-class HodgkinHuxley_Environment:
+class HodgkinHuxley_Environment(gym.Env):
     def __init__(self):
+        super().__init__()
+        self.action_space = gym.spaces.Box(
+            low=np.array([1, 1, 1, 1]),
+            high=np.array([2e3, 2e3, 5, 5]),
+            shape=(4,),
+            dtype=np.float32
+        )
+        self.observation_space = gym.spaces.Box(
+            low=np.array([-150, 0]),
+            high=np.array([150, 1e4]),
+            shape=(),
+            dtype=np.float32
+        )
         self.model = HodgkinHuxley_Model()
         self.current_step = 0
-    def reset(self):
-        self.state = {'fr_diff': 0, 'energy': 0}
-        return self.state
-        pass
+    def reset(self, *, seed=None, options=None):
+        self.state = np.array([0.0, 0.0], dtype=np.float32)
+        info = {}
+        return self.state, info
     def step(self, action):
         """
         action: stimulus parameters
@@ -23,11 +34,13 @@ class HodgkinHuxley_Environment:
         # simulation results
         results = self.model.stimulate_neurons(action, type='temporal_interferece')
         # calculate next state
-        next_state = self.calc_state(results)
+        self.state = self.calc_state(results)
         # calculate reward & episode terminality
-        reward, done = self.calc_reward(next_state)
+        reward, terminated = self.calc_reward(self.state)
+        truncated = False
         self.current_step += 1
-        return next_state, reward, done #, info
+        info = {}
+        return self.state, reward, terminated, truncated, info #, info
     def close(self):
         pass
 

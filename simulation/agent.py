@@ -4,37 +4,38 @@ import torch
 from collections import defaultdict, deque # can be optimized further with deque
 from agent_util import init_orthogonal_weights, set_seed, data_iterator
 
+
 class Critic(torch.nn.Module):
     """
     Essentially the state-value function.
     Forward function takes state input and outputs expected reward.
     """
-    def __init__(self, state_dim, is_cont, device):
+    def __init__(self, config, device):
         super().__init__()
-        self.is_cont = is_cont
+        self.is_cont = config.env.is_cont
         self.device = device
         self.m = torch.nn.Sequential(
-            torch.nn.Linear(state_dim, 64),
+            torch.nn.Linear(config.env.state_dim, 64),
             torch.nn.Tanh(),
             torch.nn.Linear(64, 64),
             torch.nn.Tanh(),
             torch.nn.Linear(64, 1)
         )
-
         self.apply(init_orthogonal_weights)
     def forward(self, state): # gets the expected reward for a state
         return self.m(state)
 
+
 class Actor(torch.nn.Module):
-    def __init__(self, state_dim, action_dim, is_cont, device, action_std):
+    def __init__(self, config, device):
         super().__init__()
-        self.is_cont = is_cont
+        self.is_cont = config.env.is_cont
         self.device = device
-        self.action_dim = action_dim
-        self.action_std = action_std
+        self.action_dim = config.env.action_dim
+        self.action_std = config.env.action_std
         self.action_var = torch.full((self.action_dim, ), self.action_std**2).to(self.device)
         self.m = torch.nn.Sequential(
-            torch.nn.Linear(state_dim, 64),
+            torch.nn.Linear(config.env.state_dim, 64),
             torch.nn.Tanh(),
             torch.nn.Linear(64, 64),
             torch.nn.Tanh(),
