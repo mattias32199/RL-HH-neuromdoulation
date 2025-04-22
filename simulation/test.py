@@ -67,4 +67,4 @@ t
 
 
 # %%
-#
+np.sum(amp_wf ** 2) * (np.max(amp_t) / 1000)

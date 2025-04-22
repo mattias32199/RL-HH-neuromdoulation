@@ -32,7 +32,7 @@ class HodgkinHuxley_Environment(gym.Env):
         action: stimulus parameters
         """
         # simulation results
-        results = self.model.stimulate_neurons(action, type='temporal_interferece')
+        results = self.model.stimulate_neurons(self._map_action(action), type='temporal_interferece')
         # calculate next state
         self.state = self.calc_state(results)
         # calculate reward & episode terminality
@@ -63,10 +63,7 @@ class HodgkinHuxley_Environment(gym.Env):
         amp_wf = simulation_results['amp_wf']
         amp_t = simulation_results['amp_t']
         nrg = np.sum(amp_wf ** 2) * (np.max(amp_t) / 1000)
-        state = {
-            'fr_diff': fr_diff,
-            'energy': nrg,
-        }
+        state = np.array([fr_diff, nrg], dtype=np.float32)
         return state
     def calc_reward(self, state, fr_coef=1.0, nrg_coef=1.0, fr_target=90, nrg_target=1000):
         fr_diff = state['fr_diff']
@@ -75,6 +72,16 @@ class HodgkinHuxley_Environment(gym.Env):
         nrg_reward = nrg_coef * (nrg_target - nrg)
         sum_reward = fr_reward + nrg_reward
         return sum_reward
+    def _map_action(self, action):
+        return {
+            'stim_type': 'PV-Pyr',
+            'amp1': action[0],
+            'amp2': action[1],
+            'freq1': action[2],
+            'freq2': action[3],
+            'total_time': 500.0, # Example
+            'plot_wf': False      # Example
+        }
 
 
 class HodgkinHuxley_Model:
