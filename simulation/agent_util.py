@@ -48,3 +48,14 @@ def set_seed(seed):
     torch.manual_seed(seed)
     np.random.seed(seed)
     random.seed(seed)
+
+def data_iterator(batch_size, given_data, t=False):
+    # Simple mini-batch splitter
+    ob, ac, oldpas, adv, tdlamret, old_v = given_data
+    total_size = len(ob)
+    inds = np.arange(total_size)
+    np.random.shuffle(inds)
+    n_batches = total_size // batch_size
+    for nb in range(n_batches):
+        idx = inds[batch_size * nb : batch_size * (nb + 1)]
+        yield ob[idx], ac[idx], oldpas[idx], adv[idx], tdlamret[idx], old_v[idx]
