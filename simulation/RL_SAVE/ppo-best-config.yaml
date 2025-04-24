@@ -1,31 +1,29 @@
-device: "cpu"
+device: cpu
 seed: 42
 env:
-  is_cont: True
+  is_cont: true
   state_dim: 2
   action_dim: 4
 network:
   action_std_init: 0.4
   action_std_decay_rate: 0.03
   min-action_std: 0.1
-  action_std_decay_freq: 3e4
-  shared_layer: False
+  action_std_decay_freq: 30000.0
+  shared_layer: false
   optimizer:
-    lr: 3e-4
+    lr: 0.0003
 train:
   total_timesteps: 1000
-  #total_timesteps: 90
   max_episode_len: 100
-  #max_episode_len: 30
   gamma: 0.99
   tau: 0.95
-  reward_scaler: False
-  observation_normalizer: False
-  clipping_gradient: True
-  scheduler: True
+  reward_scaler: false
+  observation_normalizer: false
+  clipping_gradient: true
+  scheduler: true
   average_interval: 30
   max_ckpt_count: 3
-  advantage_type: "gae"
+  advantage_type: gae
   off_policy_buffer_size: 0
   fraction: 0
 ppo:
@@ -35,4 +33,5 @@ ppo:
   eps_clip: 0.2
   coef_value_function: 0.5
   coef_entropy_penalty: 0.1
-  value_clipping: True
+  value_clipping: true
+checkpoint_path: .

@@ -1,16 +1,21 @@
 from simulation_Pyr import simulation_Pyr
 from simulation_PV import simulation_PV
 import numpy as np
+import pandas as pd
+import os
 import ray
 from scipy.signal import find_peaks
 import gymnasium as gym
 
 
 class HodgkinHuxley_Environment(gym.Env):
-    def __init__(self):
+    def __init__(self, algo, stim_time=500):
         super().__init__()
+        self.algo = algo
+        self.stim_time = stim_time
+        self.cell_id = 6 # default Pyr cell
         self.action_space = gym.spaces.Box(
-            low=np.array([1, 1, 5, 5]),
+            low=np.array([100, 100, 1e2, 1e2]),
             high=np.array([2e3, 2e3, 20e3, 20e3]),
             shape=(4,),
             dtype=np.float32
@@ -22,10 +27,12 @@ class HodgkinHuxley_Environment(gym.Env):
             dtype=np.float32
         )
         self.model = HodgkinHuxley_Model()
+        self.storage = Storage()
         self.current_step = 0
     def reset(self, *, seed=None, options=None):
         self.state = np.array([0.0, 0.0], dtype=np.float32)
         info = {}
+        # don't reset storage
         return self.state, info
     def step(self, action):
         """
@@ -37,20 +44,19 @@ class HodgkinHuxley_Environment(gym.Env):
         self.state, terminated = self.calc_state(results)
         # calculate reward & episode terminality
         reward = self.calc_reward(self.state)
-        truncated = False
+        truncated = 0
         self.current_step += 1
-        info = {}
+        info = {'cell_id': self.cell_id}
 
-        print('PINEAPPLE\n\n')
-        print(action)
-        print(self.state)
-        print(reward)
-        print(terminated)
-        print(truncated)
-
-        print(info)
+        print('PINEAPPLE', info)
+        print('action', action)
+        print('state', self.state)
+        print('reward', reward)
+        print('terminated', terminated, 'truncated', truncated)
+        self.storage.store(self.state, reward, terminated, truncated, info)
         return self.state, reward, terminated, truncated, info #, info
     def close(self):
+        self.storage.save(self.algo, postfix='latest')
         pass
 
     def get_firing_rate(self, membrane_potential, t):
@@ -78,10 +84,11 @@ class HodgkinHuxley_Environment(gym.Env):
         fr_s1 = self.get_firing_rate(s1o_neuron, s1o_time)
         fr_s2 = self.get_firing_rate(s2o_neuron, s2o_time)
         fr_d = self.get_firing_rate(do_neuron, do_time)
-        fr_diff = fr_d - ((fr_s1 + fr_s2) / 2)
-        terminated = False
+        # fr_diff = fr_d - ((fr_s1 + fr_s2) / 2)
+        fr_diff = fr_d - np.max([fr_s1, fr_s2]) # take max firing rate to prevent imbalance
+        terminated = 0
         if fr_diff >= 90:
-            terminated = True
+            terminated = 1
         # energy efficiency
         #amp_wf = simulation_results['amp_wf']
         #amp_t = simulation_results['amp_t']
@@ -91,7 +98,7 @@ class HodgkinHuxley_Environment(gym.Env):
         nrg = nrg_shallow1 + nrg_shallow2
         state = np.array([fr_diff, nrg], dtype=np.float32)
         return state, terminated
-    def calc_reward(self, state, fr_coef=0.6, nrg_coef=0.4, fr_target=50, nrg_target=0.0004):
+    def calc_reward(self, state, fr_coef=0.8, nrg_coef=0.2, fr_target=50, nrg_target=0.0004):
         nrg_target = self.observation_space.high[1] ** 2 * 500e-3 * 2 # calculate nrg target from upper bound
         fr_diff = state[0]
         nrg = state[1] # energy HAHA GET IT skibidi
@@ -110,14 +117,15 @@ class HodgkinHuxley_Environment(gym.Env):
             'freq2': action[1],
             'amp1': action[2],
             'amp2': action[3],
-            'total_time': 500.0, # Example
+            'total_time': self.stim_time, # Example
             'plot_wf': False      # Example
         }
     def normalize_firing_rate(self, fr):
         return (fr - self.observation_space.low[0]) / (self.observation_space.high[0] - self.observation_space.low[0])
     def normalize_nrg(self, nrg):
         return (nrg - self.observation_space.low[1]) / (self.observation_space.high[1] - self.observation_space.low[1])
-
+    def set_cell_id(self, cell_id):
+        self.cell_id = cell_id
 
 class HodgkinHuxley_Model:
     """
@@ -126,15 +134,12 @@ class HodgkinHuxley_Model:
     """
     def __init__(self):
         pass
-
     def stimulate_neurons(self, parameters, type='temporal_interference'):
         stimulation_type = parameters['stim_type']
         amplitude1, amplitude2 = parameters['amp1'], parameters['amp2']
         frequency1, frequency2 = parameters['freq1'], parameters['freq2']
         total_time = parameters['total_time']
         plot_waveform = parameters['plot_wf']
-
-
         if stimulation_type == 'temporal_interference':
             ray_results = [
                 # shallow neuron 1
@@ -204,3 +209,39 @@ class HodgkinHuxley_Model:
                 'amp_t': amp_t
             }
         return results
+
+class Storage:
+    def __init__(self):
+        self.episode = []
+        self.state_fr = []
+        self.state_nrg = []
+        self.rewards = []
+        self.termination_history = []
+        self.truncation_history = []
+        self.cumulative_rewards = []
+        self.cumulative_reward = 0
+        self.average_rewards = []
+    def store(self, state, reward, terminated, truncated, info):
+        self.episode.append(info['cell_id'])
+        self.state_fr.append(state[0])
+        self.state_nrg.append(state[1])
+        self.rewards.append(reward)
+        self.termination_history.append(terminated)
+        self.truncation_history.append(truncated)
+        self.cumulative_reward += reward
+        self.cumulative_rewards.append(self.cumulative_reward)
+        self.average_rewards.append(np.mean(self.rewards))
+    def save(self, algo, postfix):
+        data = {
+            'cell_id': self.episode,
+            'fr_state': self.state_fr,
+            'nrg_state': self.state_nrg,
+            'reward': self.rewards,
+            'terminated': self.termination_history,
+            'truncated': self.truncation_history,
+            'cumulative_reward': self.cumulative_rewards,
+            'average_reward': self.average_rewards
+        }
+        df = pd.DataFrame(data)
+        save_path = os.path.join('RL_SAVE', f'{algo}-{postfix}.csv')
+        df.to_csv(save_path, index=False)

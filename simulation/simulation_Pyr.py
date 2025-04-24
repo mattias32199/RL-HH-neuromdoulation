@@ -19,9 +19,8 @@ from pulse_train import PulseTrain_TI, PulseTrain_square
 from helper import fibonacci_sphere, plot_electrode_and_neuron
 
 @ray.remote(num_cpus=1, max_calls=1)
-def simulation_Pyr(num_electrode, amp1, amp2, freq1, freq2, total_time,plot_waveform):
+def simulation_Pyr(num_electrode, amp1, amp2, freq1, freq2, total_time,plot_waveform, cell_type=6):
     process = psutil.Process(os.getpid())
-    cell_type = 6
     ##################################################################################
     ################## ICMS Monopolar Experimental Setup #############################
     ##################################################################################

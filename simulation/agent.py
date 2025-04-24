@@ -1,8 +1,10 @@
 import numpy as np
 import random
 import torch
+import os
+from omegaconf import OmegaConf
 from collections import defaultdict, deque # can be optimized further with deque
-from agent_util import init_orthogonal_weights, set_seed, data_iterator
+from agent_util import init_orthogonal_weights, set_seed, data_iterator, get_config
 
 
 class Critic(torch.nn.Module):
@@ -32,7 +34,7 @@ class Actor(torch.nn.Module):
         self.is_cont = config.env.is_cont
         self.device = device
         self.action_dim = config.env.action_dim
-        self.action_std = config.env.action_std
+        self.action_std = config.network.action_std_init
         self.action_var = torch.full((self.action_dim, ), self.action_std**2).to(self.device)
         self.m = torch.nn.Sequential(
             torch.nn.Linear(config.env.state_dim, 64),
@@ -61,6 +63,7 @@ class Actor(torch.nn.Module):
 
     def forward(self, state, action=None):
         if self.is_cont:
+            print('forward_cont')
             action_mean = self.m(state)
             action_var = self.action_var.expand_as(action_mean)
             cov_mat = torch.diag_embed(action_var).to(self.device)
@@ -69,6 +72,7 @@ class Actor(torch.nn.Module):
             action_probs = self.m(state)
             dist = torch.distributions.Categorical(action_probs)
         if action is None:
+            print('forward action is none')
             action = dist.sample()
         return action, dist.log_prob(action), dist.entropy()
 
@@ -146,6 +150,7 @@ class PPO_Memory:
             else:
                 self.temp_memory[k].append(v)
     def finish(self, next_state, next_value, next_state_done):
+        #print('temp_memory', self.temp_memory.items())
         trajectory = {
             k: torch.stack(v)
                 if isinstance(v[0], torch.Tensor)
@@ -161,15 +166,21 @@ class PPO_Memory:
             [trajectory['value'], next_value.unsqueeze(0)],
             dim=0
         )
+        print('next_state_done', next_state_done)
         trajectory['done'] = torch.cat(
             [trajectory['done'], torch.from_numpy(next_state_done).to(self.device).unsqueeze(0)],
         )
-        priority = torch.ones((num_envs))
-        for i in range(num_envs):
-            self.tree.add(
-                value=priority[i].item(),
-                data={k: v[:, i] for k, v in trajectory.items()}
-            )
+        # priority = torch.ones((num_envs))
+        # for i in range(num_envs):
+        #     self.tree.add(
+        #         value=priority[i].item(),
+        #         data={k: v[:, i] for k, v in trajectory.items()}
+        #     )
+        priority = torch.ones(1)
+        self.tree.add(
+            value=priority[0].item(),
+            data={k: v for k, v in trajectory.items()}
+        )
         self.reset_temp_memory()
     def uniform_sample(self, num_of_trajectories, network):
         inds = np.arange(self.tree.size)
@@ -177,7 +188,7 @@ class PPO_Memory:
         batch = defaultdict(list)
         for i in inds:
             for k, v in self.tree.data[i].items():
-                batch[k].append(v.unsqueeze[1])
+                batch[k].append(v.unsqueeze(1))
         return self.calculate(network, batch), inds
     def calculate(self, network, batch):
         batch = {
@@ -192,7 +203,8 @@ class PPO_Memory:
             batch = self.calc_vtrace_gae(**batch)
         return batch
     def calc_gae(self, state, action, reward, done, value, logprob):
-        steps, num_envs = reward.size()
+        steps = reward.size(0)
+        num_envs = 1
         gae_t = torch.zeros(num_envs).to(self.device)
         advantage = torch.zeros((steps, num_envs)).to(self.device)
         for t in reversed(range(steps)): # Each episode is calculated separately by done.
@@ -312,91 +324,102 @@ class OffPolicy_PPOAgent:
         config contains hyper parameters
         """
         self.config = config
-        self.device = torch.device("cpu") # macbook pro
+        self.device = torch.device(config.device) # macbook pro
         set_seed(self.config.seed)
 
-        self.policy = Actor(
-            state_dim=hyper_params['state_dim'],
-            action_dim=hyper_params['action_dim'],
-            is_cont=hyper_params['is_cont'],
-            action_std=hyper_params['action_std'],
-            device=self.device,
-        ).to(self.device)
-        self.old_policy = Actor(
-            state_dim=hyper_params['state_dim'],
-            action_dim=hyper_params['action_dim'],
-            is_cont=hyper_params['is_cont'],
-            action_std=hyper_params['action_std'],
-            device=self.device,
-        ).to(self.device)
-        self.critic = Critic(
-            state_dim=hyper_params['state_dim'],
-            is_cont=hyper_params['is_cont'],
-            device=self.device,
-        )
+        self.policy = Actor(config, self.device).to(self.device)
+        self.old_policy = Actor(config, self.device).to(self.device)
+        self.critic = Critic(config, self.device).to(self.device)
 
         self.policy_optimizer = torch.optim.Adam(
             self.policy.parameters(),
-            **hyper_params['network']
+            **self.config.network.optimizer
         )
         self.critic_optimizer = torch.optim.Adam(
             self.critic.parameters(),
-            **hyper_params['network']
+            **self.config.network.optimizer
         )
 
-        if hyper_params['scheduler']:
+        if config.train.scheduler:
             self.scheduler1 = WarmupLinearScheduler(
                 optimizer=self.policy_optimizer,
                 warmup_steps=0, # look at this again?
-                max_steps = hyper_params['max_steps'] # look at this again too!!
+                max_steps = self.config.train.total_timesteps
             )
             self.scheduler2 = WarmupLinearScheduler(
                 optimizer=self.critic_optimizer,
                 warmup_steps=0, # !!
-                max_steps = hyper_params['max_steps'] # !!
+                max_steps = self.config.train.total_timesteps
             )
-
         # reward scaler?
         # observation scaler?
         # implement logging?
-
-        self.hyper_params = hyper_params
         self.timesteps = 0
-    def save(self):
-        # save function?
-        pass
+    def save(self, postfix="latest"):
+        save_dir = "RL_SAVE"
+        config_path = os.path.join(save_dir, f"ppo-{postfix}-config.yaml")
+        with open(config_path, 'w') as fp:
+            OmegaConf.save(config=self.config, f=fp)
+        # Save policy model
+        policy_path = os.path.join(save_dir, f"policy-{postfix}.pt")
+        torch.save(self.policy.state_dict(), policy_path)
+        print(f"Simplified save: Config saved to '{config_path}' and policy saved to '{policy_path}'")
+    @classmethod
+    def load(cls, postfix):
+        save_dir = "RL_SAVE"
+        config_path = os.path.join(save_dir, "ppo-latest-config.yaml")
+        config = get_config(config_path)
+        ppo_algo = OffPolicy_PPOAgent(config)
+        policy_path = os.path.join(save_dir, "policy-latest.pt")
+        ppo_algo.policy.load_state_dict(torch.load(policy_path))
+        return ppo_algo
 
     def train(self, envs):
         # start training time?
-        reward_queue = deque([0], maxlen=self.hyper_params['average_interval'])
-        duration_queue = deque([0], maxlen=self.hyper_params['average_interval'])
-        episodic_reward, duration, done = np.zeros(1), np.zeros(1), np.zeros(1)
+        reward_queue = deque([0], maxlen=self.config.train.average_interval)
+        duration_queue = deque([0], maxlen=self.config.train.average_interval)
+        episodic_reward, duration, done = np.zeros(1), np.zeros(1), 0
         best_score = -1e9
         self.memory = PPO_Memory(
-            gamma=self.hyper_params['gamma'],
-            tau=self.hyper_params['tau'],
-            advantage_type=self.hyper_params['advantage_type'],
+            gamma=self.config.train.gamma,
+            tau=self.config.train.tau,
+            advantage_type=self.config.train.advantage_type,
             device=self.device,
-            off_policy_buffer_size=self.hyper_params['off_policy_buffer_size'] # double check?
+            off_policy_buffer_size=self.config.train.off_policy_buffer_size if self.config.train.off_policy_buffer_size > 0 else 1,
         )
-        next_action_std_decay_step = self.hyper_params['network']['decay_freq']
+        next_action_std_decay_step = self.config.network.action_std_decay_freq
         state, _ = envs.reset() # initial states # change
         #done = np.zeros(self.hyper_params.num_envs) # for vectorized more efficient training
         # (running multiple environments in parallel) for our purposes num_envs=1
-        print("Start trainig...")
+        print("Start training...")
         self.policy.eval()
         # main training loop for predefined total training timesteps (hard stop)
-        while self.timesteps < self.hyper_params['total_timesteps']:
+        while self.timesteps < self.config.train.total_timesteps:
             # number of episodes to run on neuron
             next_state = None
-            for t in range(0, self.hyper_params['max_episode_len']): # train param
+            for t in range(0, self.config.train.max_episode_len): # train param
                 with torch.no_grad():
                     # add observation normalizer?
                     _state = torch.from_numpy(state).to(self.device, dtype=torch.float)
                     action, logprobs, _ = self.policy(_state)
-                    values = self.critic(_state)
-                    values = values.flatten()
-                next_state, reward, terminated, truncated, _ = envs.stimulate() # fix
+                    print('action:', action)
+                    values = self.critic(_state).flatten()
+
+                    # mattias
+                    low = torch.tensor(envs.action_space.low, device=self.device, dtype=torch.float)
+                    high = torch.tensor(envs.action_space.high, device=self.device, dtype=torch.float)
+                    scaled_action = low + (0.5 * (action + 1) * (high - low)) # linear scaling
+                    # log_low = np.log(low)
+                    # log_high = np.log(high)
+                    # log_action_range = log_high - log_low
+                    # log_action = log_low + (0.25 * log_action)
+                    print('scaled_action:', scaled_action)
+                    clipped_action = np.clip(
+                        scaled_action.cpu().numpy(), envs.action_space.low, envs.action_space.high
+                    )
+
+                next_state, reward, terminated, truncated, _ = envs.step(clipped_action)
+                # reward * 100
                 self.timesteps += 1 # finish 1 time step
                 episodic_reward += reward
                 duration += 1
@@ -404,18 +427,18 @@ class OffPolicy_PPOAgent:
                 self.memory.store(
                     state=state,
                     action=action,
-                    reward=reward,
-                    done=done,
+                    reward=np.array([reward]).astype(np.float32),
+                    done=np.array([done]).astype(np.float32),
                     value=values,
                     logprob=logprobs
                 )
                 done = terminated + truncated
-                for idx, d in enumerate(done):
-                    if d:
-                        reward_queue.append(episodic_reward[idx])
-                        duration_queue.append(duration[idx])
-                        episodic_reward[idx] = 0
-                        duration[idx] = 0
+                #for idx, d in enumerate(done): # for if vectorized environments
+                    #if d:
+                        #reward_queue.append(episodic_reward[idx])
+                        #duration_queue.append(duration[idx])
+                        #episodic_reward[idx] = 0
+                        #duration[idx] = 0
                 state = next_state
 
             # Calculate gae for optimization
@@ -424,32 +447,31 @@ class OffPolicy_PPOAgent:
                 next_value = self.critic(torch.Tensor(next_state).to(self.device))
                 next_value = next_value.flatten()
             self.optimize(next_state, next_value, done)
-            if self.hyper_params['is_cont']:
+            if self.config.env.is_cont:
                 while self.timesteps > next_action_std_decay_step:
-                    next_action_std_decay_step += self.hyper_params['action_std_decay_freq'] # network param
+                    next_action_std_decay_step += self.config.network.action_std_decay_freq
                     self.policy.action_decay(
-                        self.hyper_params['action_std_decay_rate'], # network params
-                        self.hyper_params['min_action_std'] # network params
+                        self.config.network.action_std_decay_rate,
+                        self.config.network.min_action_std
                     )
-            if self.hyper_params['scheduler']:
-                self.scheduler1.step()
-                self.scheduler2.step()
             # logging?
             avg_score = np.round(np.mean(reward_queue), 4)
             # Writing for tensorboard?
             if avg_score >= best_score:
-                #self.save('best', envs)
+                self.save(postfix='best')
                 best_score = avg_score
+        envs.close()
+        self.save()
+        return best_score
 
-
-
-    def optimize(self, next_state, next_value, done):
+    def optimize(self, next_state, next_value, done): # mattias
+        done = np.array([done]).astype(np.float32)
         self.copy_network_param()
         self.memory.finish(next_state, next_value, done)
-        fraction = self.hyper_params('fraction') # training param
+        fraction = self.config.train.fraction
         self.policy.train()
         # PPO training loop
-        for _ in range(self.hyper_params['optim_epochs']): # training param
+        for _ in range(self.config.ppo.optim_epochs):
             avg_policy_loss, avg_entropy_loss, avg_value_loss = 0, 0, 0
             if 1 - fraction > 0: # uniform sample
                 data, inds = self.memory.uniform_sample(
@@ -457,34 +479,52 @@ class OffPolicy_PPOAgent:
                     (self.old_policy, self.critic)
                 ) # num_envs
                 data = self.prepare_data(data)
-                data_loader = data_iterator(self.hyper_params['batch_size'], data) # training param
+                data_loader = data_iterator(self.config.ppo.batch_size, data)
                 value_loss = self.optimize_critic(data_loader)
                 avg_value_loss += value_loss
-                if self.hyper_params['off_policy_buffer_size'] > 0:
+                if self.config.train.off_policy_buffer_size > 0:
                     self.memory.update_priority((self.old_policy, self.critic), inds)
-                data_loader = data_iterator(self.hyper_params['batch_size'], data) # training param
+                data_loader = data_iterator(self.config.ppo.batch_size, data)
                 p_loss, e_loss = self.optimize_actor(data_loader)
                 avg_policy_loss += p_loss
                 avg_entropy_loss += e_loss
-            if fraction > 0: # critic prioritized sampling
+            if fraction > 0:
+                # critic prioritized sampling
                 data, inds = self.memory.priority_sample(
                     int(1 * fraction),
                     (self.old_policy, self.critic)
                 )
                 data = self.prepare_data(data)
-                data_loader = data_iterator(self.hyper_params['batch_size'], data) # training params
+                data_loader = data_iterator(self.config.ppo.batch_size, data) # training params
+                v_loss = self.optimize_critic(data_loader)
+                avg_value_loss += v_loss
+                self.memory.update_priority((self.old_policy, self.critic), inds)
+
+                data, _ = self.memory.priority_sample(
+                    int(1*fraction),
+                    (self.old_policy, self.critic),
+                    inverse=True
+                )
+                data = self.prepare_data(data)
+                data_loader = data_iterator(self.config.ppo.batch_size, data)
                 p_loss, e_loss = self.optimize_actor(data_loader)
                 avg_policy_loss += p_loss
                 avg_entropy_loss += e_loss
+
+                if self.config.train.scheduler > 0: # and len(data_loader)
+                    self.scheduler1.step()
+                    self.scheduler2.step()
             # Recording / write functions?
 
-    def play(self, env, max_ep_len, num_episodes=10):
+    def play(self, env, max_ep_len, num_episodes):
         rewards = []
         durations = []
+        # episode loop
         for episode in range(num_episodes):
             episodic_reward = 0
             duration = 0
             state, _ = env.reset()
+            # time step per episode loop
             for t in range(max_ep_len): # collect trajectories
                 with torch.no_grad():
                     action, _, _, = self.policy(torch.Tensor(state).unsqueeze(0).to(self.device))
@@ -514,16 +554,16 @@ class OffPolicy_PPOAgent:
         return state, action, logprob, advant, value_target, value
     def optimize_critic(self, data_loader):
         value_losses = []
-        c1 = self.hyper_params['coef_value_function'] # training param
+        c1 = self.config.ppo.coef_value_function
         for batch in data_loader:
             bev_op, _, _, _, bev_vtarg, bev_v = batch
             cur_v = self.critic(bev_op)
             cur_v = cur_v.reshape(-1)
-            if self.hyper_params['value_clipping']: # value loss + training param
+            if self.config.ppo.value_clipping: # value loss
                 cur_v_clipped = bev_v + torch.clamp(
                     cur_v - bev_v,
-                    -self.hyper_params['eps_clip'], # trainig params
-                    self.hyper_params['eps_clip'], # training params
+                    -self.config.ppo.eps_clip,
+                    self.config.ppo.eps_clip,
                 )
                 vloss1 = (cur_v - bev_vtarg) ** 2
                 vloss2 = (cur_v_clipped - bev_vtarg) ** 2
@@ -534,7 +574,7 @@ class OffPolicy_PPOAgent:
             self.critic_optimizer.zero_grad()
             critic_loss = c1 * vf_loss
             critic_loss.backward()
-            if self.hyper_params['clipping_gradient']: # training params
+            if self.config.train.clipping_gradient:
                 torch.nn.utils.clip_grad_norm_(self.critic.parameters(), max_norm=0.5)
             self.critic_optimizer.step()
             # record training loss data?
@@ -543,7 +583,7 @@ class OffPolicy_PPOAgent:
     def optimize_actor(self, data_loader):
         policy_losses = []
         entropy_losses = []
-        c2 = self.hyper_params['coef_entropy_penalty'] # training params
+        c2 = self.config.ppo.coef_entropy_penalty
         for batch in data_loader:
             bev_ob, bev_ac, bev_logp, bev_adv, _, _ = batch
             bev_adv = (bev_adv - bev_adv.mean()) / (bev_adv.std() + 1e-7)
@@ -553,13 +593,13 @@ class OffPolicy_PPOAgent:
             # policy loss
             ratio = torch.exp(cur_logp - bev_logp)
             surr1 = ratio * bev_adv
-            if self.hyper_params['loss_type']: # training params
-                lower = (1 - self.hyper_params['eps_clip']) * torch.exp(old_logp - bev_logp)
-                upper = (1 + self.hyper_params['eps_clip']) * torch.exp(old_logp - bev_logp)
+            if self.config.ppo.loss_type == 'clip':
+                lower = (1 - self.config.ppo.eps_clip) * torch.exp(old_logp - bev_logp)
+                upper = (1 + self.config.ppo.eps_clip) * torch.exp(old_logp - bev_logp)
                 clipped_ratio = torch.clamp(ratio, lower, upper)
                 surr2 = clipped_ratio * bev_adv
                 policy_surr = torch.min(surr1, surr2)
-            elif self.hyper_params['loss_type'] == 'kl': # kl-divergence loss
+            elif self.config.ppo.loss_type == 'kl': # kl-divergence loss
                 policy_surr = surr1 - 0.01 * torch.exp(bev_logp) * (bev_logp - cur_logp)
             else: # simple ratio loss
                 policy_surr = surr1
@@ -568,7 +608,7 @@ class OffPolicy_PPOAgent:
             self.policy_optimizer.zero_grad()
             policy_loss = policy_surr + c2 * policy_ent
             policy_loss.backward()
-            if self.hyper_params['clipping_gradient']: # training params
+            if self.config.train.clipping_gradient:
                 torch.nn.utils.clip_grad_norm_(self.policy.parameters(), max_norm=0.5)
             self.policy_optimizer.step()
             policy_losses.append(policy_surr.item())

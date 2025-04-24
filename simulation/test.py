@@ -3,22 +3,23 @@ from simulation_Pyr import simulation_Pyr
 from simulation_PV import simulation_PV
 import ray
 import importlib as imp
-import mdp_util
-imp.reload(mdp_util)
-from mdp_util import HodkinHuxley_Model, hodgkin_huxley_model, get_firing_rate
+import environment
+imp.reload(environment)
+from environment import HodgkinHuxley_Model
 import numpy as np
 
 
 # %%
-hh_model = HodkinHuxley_Model()
+hh_model = HodgkinHuxley_Model()
 
 parameters = {}
-parameters['amp1'] = 150
-parameters['amp2'] = 150
-parameters['freq1'] = 2e2
-parameters['freq2'] = 2.05e2
+parameters['amp1'] = 1662
+parameters['amp2'] = 1767
+parameters['freq1'] = 15200
+parameters['freq2'] = 17700
 parameters['total_time'] = 500
 parameters['plot_wf'] = False
+parameters['stim_type'] = 'temporal_interference'
 
 results = hh_model.stimulate_neurons(parameters)
 
@@ -26,21 +27,23 @@ results = hh_model.stimulate_neurons(parameters)
 
 import matplotlib.pyplot as plt
 
-x0 = results['amp_t']
-y0 = results['amp_wf']
+x0 = results['s1_input_time']
+y0 = results['s1_input']
 
-x1 = results['t_Pyr']
-y1 = results['response_Pyr']
-f1 = get_firing_rate(y1, x1)
+x1 = results['s2_input_time']
+y1 = results['s2_input']
+#f1 = get_firing_rate(y1, x1)
 
-x2 = results['t_PV']
-y2 = results['response_PV']
-f2 = get_firing_rate(y2, x2)
+x2 = results['d_input_time']
+y2 = results['d_input']
+#f2 = get_firing_rate(y2, x2)
+
+limit = 2000
 
 plt.figure()
-plt.plot(x0, y0, c='k')
-plt.plot(x1, y1, c='royalblue', label=f'Pyr {f1}')
-plt.plot(x2, y2, c='orangered', label=f'PV {f2}')
+plt.plot(x0[0:limit], y0[0:limit], c='royalblue', label='shallow 1')
+plt.plot(x1[0:limit], y1[0:limit], c='orangered', label='shallow 2')
+plt.plot(x2[0:limit], y2[0:limit], c='green', label=f'deep')
 plt.legend()
 plt.show()
 
