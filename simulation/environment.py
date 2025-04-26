@@ -53,7 +53,7 @@ class HodgkinHuxley_Environment(gym.Env):
         print('state', self.state)
         print('reward', reward)
         print('terminated', terminated, 'truncated', truncated)
-        self.storage.store(self.state, reward, terminated, truncated, info)
+        self.storage.store(action, self.state, reward, terminated, truncated, info)
         return self.state, reward, terminated, truncated, info #, info
     def close(self):
         self.storage.save(self.algo, postfix='latest')
@@ -213,6 +213,10 @@ class HodgkinHuxley_Model:
 class Storage:
     def __init__(self):
         self.episode = []
+        self.action_A1 = []
+        self.action_A2 = []
+        self.action_f1 = []
+        self.action_f2 = []
         self.state_fr = []
         self.state_nrg = []
         self.rewards = []
@@ -221,8 +225,12 @@ class Storage:
         self.cumulative_rewards = []
         self.cumulative_reward = 0
         self.average_rewards = []
-    def store(self, state, reward, terminated, truncated, info):
+    def store(self, action, state, reward, terminated, truncated, info):
         self.episode.append(info['cell_id'])
+        self.action_f1.append(action[0])
+        self.action_f2.append(action[1])
+        self.action_A1.append(action[2])
+        self.action_A2.append(action[3])
         self.state_fr.append(state[0])
         self.state_nrg.append(state[1])
         self.rewards.append(reward)
@@ -236,6 +244,10 @@ class Storage:
             'cell_id': self.episode,
             'fr_state': self.state_fr,
             'nrg_state': self.state_nrg,
+            'action_f1': self.action_f1,
+            'action_f2': self.action_f2,
+            'action_A1': self.action_A1,
+            'action_A2': self.action_A2,
             'reward': self.rewards,
             'terminated': self.termination_history,
             'truncated': self.truncation_history,

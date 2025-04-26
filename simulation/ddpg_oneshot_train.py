@@ -15,7 +15,7 @@ model = DDPG("MlpPolicy", hh_ddpg_env, action_noise=action_noise, verbose=1)
 for cell_id in train_cell_ids:
     hh_ddpg_env.set_cell_id(cell_id)
     model.set_env(hh_ddpg_env)
-    model.learn(total_timesteps=1000) # 3 episides * 30 = 90
+    model.learn(total_timesteps=200) # 3 episides * 30 = 90
     hh_ddpg_env.storage.save(algo='ddpg', postfix='train-1060')
 model.save("ddpg-train") # save training model
 
@@ -27,7 +27,7 @@ for cell_id in test_cell_ids:
         terminated = False
         total_reward = 0
         iter = 0
-        while (not terminated) and (iter < 40):
+        while (not terminated) and (iter < 4):
             action, _states = test_model.predict(state)
             state, reward, terminated, truncated, info = hh_ddpg_env.step(action)
             iter += 1
